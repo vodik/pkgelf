@@ -36,7 +36,7 @@ static const char *find_strtable(const char *memblock, uintptr_t relocbase, cons
     errx(1, "failed to find string table");
 }
 
-static void dump_elf(const char *memblock, const char *path)
+static void dump_elf(const char *memblock)
 {
     static const char magic[] = { ELFMAG0, ELFMAG1, ELFMAG2, ELFMAG3 };
 
@@ -54,8 +54,6 @@ static void dump_elf(const char *memblock, const char *path)
     if (elf->e_phoff) {
         relocbase = find_relocbase(memblock, elf);
     }
-
-    printf(":: %s\n", path);
 
     if (elf->e_shoff) {
         const Elf64_Shdr *shdr = (Elf64_Shdr *)&memblock[elf->e_shoff];
@@ -108,6 +106,8 @@ int alpm_dump_elf(const char *filename)
     archive_read_support_filter_all(archive);
     archive_read_support_format_all(archive);
 
+    printf(":: %s\n", filename);
+
     int r = archive_read_open_memory(archive, memblock, st.st_size);
     if (r != ARCHIVE_OK) {
         warnx("%s is not an archive", filename);
@@ -126,8 +126,6 @@ int alpm_dump_elf(const char *filename)
         }
 
         const mode_t mode = archive_entry_mode(entry);
-        const char *path  = archive_entry_pathname(entry);
-
         if (!S_ISREG(mode))
             continue;
 
@@ -137,7 +135,7 @@ int alpm_dump_elf(const char *filename)
         if (bytes_r < block_size)
             err(1, "didn't read enough bytes");
 
-        dump_elf(block, path);
+        dump_elf(block);
         free(block);
     }
 
