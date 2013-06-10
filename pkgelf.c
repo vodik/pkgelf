@@ -278,18 +278,20 @@ cleanup:
 int main(int argc, char *argv[])
 {
     static const struct option opts[] = {
-        { "help",     no_argument,       0, 'h' },
-        { "version",  no_argument,       0, 'v' },
-        { "pkg",      required_argument, 0, 'p' },
-        { "dir",      required_argument, 0, 'd' },
+        { "help",     no_argument, 0, 'h' },
+        { "version",  no_argument, 0, 'v' },
+        { "all",      no_argument, 0, 'a' },
+        { "pkg",      no_argument, 0, 'p' },
+        { "dir",      no_argument, 0, 'd' },
         { 0, 0, 0, 0 }
     };
 
     int i;
     int (*dumper)(const char *name) = pkg_dump_elf;
+    bool all = false;
 
     while (true) {
-        int opt = getopt_long(argc, argv, "hvpd", opts, NULL);
+        int opt = getopt_long(argc, argv, "hvapd", opts, NULL);
         if (opt == -1)
             break;
 
@@ -302,6 +304,9 @@ int main(int argc, char *argv[])
             exit(EXIT_SUCCESS);
         case 'p':
             dumper = pkg_dump_elf;
+            break;
+        case 'a':
+            all = true;
             break;
         case 'd':
             dumper = dir_dump_elf;
@@ -328,7 +333,7 @@ int main(int argc, char *argv[])
             const char *name = it->data;
             if (alpm_list_find_str(provide, name) == NULL)
                 printf("REQUIRE %s\n", name);
-            else
+            else if (all)
                 printf("REQUIRE %s [self provided]\n", name);
         }
 

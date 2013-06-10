@@ -15,7 +15,6 @@ REQUIRE libglib-2.0.so=0-64
 REQUIRE libjson-c.so=2-64
 REQUIRE libm.so=6-64
 REQUIRE libpthread.so=0-64
-REQUIRE libpulse.so=0-64 [self provided]
 REQUIRE librt.so=1-64
 REQUIRE libsndfile.so=1-64
 REQUIRE libxcb.so=1-64
