@@ -158,13 +158,13 @@ static void dump_elf(const char *memblock)
 
         for (i = 0; i < elf->e_shnum; ++i) {
             switch (shdr[i].sh_type) {
-            case SHT_DYNAMIC: {
+            case SHT_DYNAMIC:
                 read_dynamic(memblock, relocbase, &shdr[i]);
                 break;
-            } case SHT_NOTE: {
+            case SHT_NOTE:
                 read_build_id(memblock, &shdr[i]);
                 break;
-            } default:
+            default:
                 break;
             }
         }
