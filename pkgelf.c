@@ -171,7 +171,8 @@ static void dump_elf(const char *memblock)
     }
 }
 
-static int dir_dump(const char *filename, const struct stat *st, int type)
+static int dir_dump(const char *filename, const struct stat *st, int type,
+                    struct FTW __attribute__((unused)) *ftw)
 {
     char *memblock = MAP_FAILED;
     int fd = 0;
@@ -205,7 +206,7 @@ cleanup:
 
 static int dir_dump_elf(const char *path)
 {
-    ftw(path, dir_dump, 7);
+    nftw(path, dir_dump, 7, FTW_PHYS);
     return 0;
 }
 
