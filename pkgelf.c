@@ -19,6 +19,7 @@
 
 static alpm_list_t *need = NULL;
 static alpm_list_t *provide = NULL;
+static alpm_list_t *build_id = NULL;
 
 static uintptr_t calc_relocbase(const char *memblock, const Elf64_Ehdr *elf)
 {
@@ -32,7 +33,14 @@ static uintptr_t calc_relocbase(const char *memblock, const Elf64_Ehdr *elf)
     return elf->e_phoff - phdr->p_vaddr;
 }
 
-static const char *find_strtable(const char *memblock, uintptr_t relocbase, const Elf64_Dyn *dyn)
+static inline const char *find_strtable(const char *memblock, const Elf64_Ehdr *elf)
+{
+    const Elf64_Off strtbl_off = elf->e_shoff + elf->e_shstrndx * elf->e_shentsize;
+    const Elf64_Shdr* strtbl = (Elf64_Shdr*)&memblock[strtbl_off];
+    return &memblock[strtbl->sh_offset];
+}
+
+static const char *find_dyn_strtable(const char *memblock, uintptr_t relocbase, const Elf64_Dyn *dyn)
 {
     const Elf64_Dyn *i;
 
@@ -72,6 +80,24 @@ static void list_add(alpm_list_t **list, const char *_data)
     free(data);
 }
 
+static char *hex_representation(unsigned char *bytes, size_t size)
+{
+    static const char *hex_digits = "0123456789abcdef";
+    char *str;
+    size_t i;
+
+    str = malloc(2 * size + 1);
+
+    for (i = 0; i < size; i++) {
+        str[2 * i] = hex_digits[bytes[i] >> 4];
+        str[2 * i + 1] = hex_digits[bytes[i] & 0x0f];
+    }
+
+    str[2 * size] = '\0';
+
+    return str;
+}
+
 static void dump_elf(const char *memblock)
 {
     static const char magic[] = { ELFMAG0, ELFMAG1, ELFMAG2, ELFMAG3 };
@@ -93,12 +119,16 @@ static void dump_elf(const char *memblock)
 
     if (elf->e_shoff) {
         const Elf64_Shdr *shdr = (Elf64_Shdr *)&memblock[elf->e_shoff];
+        /* const char *strtable = find_strtable(memblock, elf); */
         int i;
 
         for (i = 0; i < elf->e_shnum; ++i) {
-            if (shdr[i].sh_type == SHT_DYNAMIC) {
+            /* const char *name = strtable + shdr[i].sh_name; */
+            /* if (strcmp(".dynamic", name) == 0) { */
+            switch (shdr[i].sh_type) {
+            case SHT_DYNAMIC: {
                 const Elf64_Dyn *j, *dyn = (Elf64_Dyn *)&memblock[shdr[i].sh_offset];
-                const char *strtable = find_strtable(memblock, relocbase, dyn);
+                const char *strtable = find_dyn_strtable(memblock, relocbase, dyn);
 
                 for (j = dyn; j->d_tag != DT_NULL; ++j) {
                     const char *name;
@@ -113,6 +143,21 @@ static void dump_elf(const char *memblock)
                         break;
                     }
                 }
+                break;
+            } case SHT_NOTE: {
+            /* } else if (strcmp(".note.gnu.build-id", name) == 0) { */
+                const Elf64_Nhdr *nhdr = (Elf64_Nhdr *)&memblock[shdr[i].sh_offset];
+                const char *temp = &memblock[shdr[i].sh_offset + sizeof *nhdr];
+                if (strncmp(temp, "GNU", nhdr->n_namesz) == 0 && nhdr->n_type == NT_GNU_BUILD_ID) {
+                    char *desc = malloc(nhdr->n_descsz);
+
+                    temp += nhdr->n_namesz;
+                    memcpy(desc, temp, nhdr->n_descsz);
+                    build_id = alpm_list_add(build_id, hex_representation((unsigned char *)desc, nhdr->n_descsz));
+                }
+                break;
+            } default:
+                break;
             }
         }
     }
@@ -266,22 +311,29 @@ int main(int argc, char *argv[])
 
         dumper(argv[i]);
 
+        for (it = build_id; it; it = it->next) {
+            const char *name = it->data;
+            printf("BUILD-ID %s\n", name);
+        }
+
         for (it = need; it; it = it->next) {
             const char *name = it->data;
             if (alpm_list_find_str(provide, name) == NULL)
-                printf(" REQUIRE %s\n", name);
+                printf("REQUIRE %s\n", name);
             else
-                printf(" REQUIRE %s [self provided]\n", name);
+                printf("REQUIRE %s [self provided]\n", name);
         }
 
         for (it = provide; it; it = it->next) {
             const char *name = it->data;
-            printf(" PROVIDES %s\n", name);
+            printf("PROVIDES %s\n", name);
         }
 
         alpm_list_free(need);
         alpm_list_free(provide);
+        alpm_list_free(build_id);
         need = NULL;
         provide = NULL;
+        build_id = NULL;
     }
 }
