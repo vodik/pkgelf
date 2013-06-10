@@ -1,10 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <memory.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <getopt.h>
+#include <errno.h>
 #include <err.h>
+#include <ftw.h>
 #include <elf.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -13,7 +17,10 @@
 #include <archive.h>
 #include <archive_entry.h>
 
-static uintptr_t find_relocbase(const char *memblock, const Elf64_Ehdr *elf)
+static alpm_list_t *need = NULL;
+static alpm_list_t *provide = NULL;
+
+static uintptr_t calc_relocbase(const char *memblock, const Elf64_Ehdr *elf)
 {
     if (elf->e_type == ET_DYN || elf->e_type == ET_REL)
         return 0;
@@ -42,8 +49,11 @@ static int strcmp_v(const void *p1, const void *p2)
     return strcmp(p1, p2);
 }
 
-static void list_add(alpm_list_t **list, const char *data)
+static void list_add(alpm_list_t **list, const char *_data)
 {
+    // FIXME: hack around the fact that _data can be read-only memory */
+    char *data = strdup(_data);
+
     char *ext = strrchr(data, '.');
     if (!ext || strcmp(ext, ".so") == 0)
         return;
@@ -58,9 +68,11 @@ static void list_add(alpm_list_t **list, const char *data)
         *list = alpm_list_add_sorted(*list, name, strcmp_v);
     else
         free(name);
+
+    free(data);
 }
 
-static void dump_elf(const char *memblock, alpm_list_t **need, alpm_list_t **provide)
+static void dump_elf(const char *memblock)
 {
     static const char magic[] = { ELFMAG0, ELFMAG1, ELFMAG2, ELFMAG3 };
 
@@ -76,7 +88,7 @@ static void dump_elf(const char *memblock, alpm_list_t **need, alpm_list_t **pro
     }
 
     if (elf->e_phoff) {
-        relocbase = find_relocbase(memblock, elf);
+        relocbase = calc_relocbase(memblock, elf);
     }
 
     if (elf->e_shoff) {
@@ -93,11 +105,11 @@ static void dump_elf(const char *memblock, alpm_list_t **need, alpm_list_t **pro
                     switch (j->d_tag) {
                     case DT_NEEDED:
                         name = strtable + j->d_un.d_val;
-                        list_add(need, name);
+                        list_add(&need, name);
                         break;
                     case DT_SONAME:
                         name = strtable + j->d_un.d_val;
-                        list_add(provide, name);
+                        list_add(&provide, name);
                         break;
                     }
                 }
@@ -106,13 +118,49 @@ static void dump_elf(const char *memblock, alpm_list_t **need, alpm_list_t **pro
     }
 }
 
-int alpm_dump_elf(const char *filename)
+static int dir_dump(const char *filename, const struct stat *st, int type)
+{
+    char *memblock = MAP_FAILED;
+    int fd = 0;
+
+    if (type != FTW_F)
+        return 0;
+
+    fd = open(filename, O_RDONLY);
+    if (fd < 0) {
+        if(errno != ENOENT)
+            err(EXIT_FAILURE, "failed to open %s", filename);
+        goto cleanup;
+    }
+
+    memblock = mmap(NULL, st->st_size, PROT_READ, MAP_SHARED | MAP_POPULATE, fd, 0);
+    if (memblock == MAP_FAILED)
+        err(EXIT_FAILURE, "failed to mmap package %s", filename);
+
+    dump_elf(memblock);
+
+cleanup:
+    if (fd)
+        close(fd);
+
+    if (memblock != MAP_FAILED)
+        munmap(memblock, st->st_size);
+
+    return 0;
+}
+
+static int dir_dump_elf(const char *path)
+{
+    ftw(path, dir_dump, 7);
+    return 0;
+}
+
+static int pkg_dump_elf(const char *filename)
 {
     struct archive *archive = archive_read_new();
     struct stat st;
     char *memblock = MAP_FAILED;
     int fd = 0, rc = 0;
-    alpm_list_t *need = NULL, *provide = NULL, *it;
 
     fd = open(filename, O_RDONLY);
     if (fd < 0) {
@@ -158,25 +206,9 @@ int alpm_dump_elf(const char *filename)
         if (bytes_r < block_size)
             err(1, "didn't read enough bytes");
 
-        dump_elf(block, &need, &provide);
+        dump_elf(block);
         free(block);
     }
-
-    for (it = need; it; it = it->next) {
-        const char *name = it->data;
-        if (alpm_list_find_str(provide, name) == NULL)
-            printf(" REQUIRE %s\n", name);
-        else
-            printf(" REQUIRE %s [self provided]\n", name);
-    }
-
-    for (it = provide; it; it = it->next) {
-        const char *name = it->data;
-        printf(" PROVIDES %s\n", name);
-    }
-
-    alpm_list_free(need);
-    alpm_list_free(provide);
 
 cleanup:
     if (fd)
@@ -192,12 +224,68 @@ cleanup:
 
 int main(int argc, char *argv[])
 {
+    static const struct option opts[] = {
+        { "help",     no_argument,       0, 'h' },
+        { "version",  no_argument,       0, 'v' },
+        { "pkg",      required_argument, 0, 'p' },
+        { "dir",      required_argument, 0, 'd' },
+        { 0, 0, 0, 0 }
+    };
+
     int i;
+    bool from_pkg = true;
+
+    while (true) {
+        int opt = getopt_long(argc, argv, "hvpd", opts, NULL);
+        if (opt == -1)
+            break;
+
+        switch (opt) {
+        case 'h':
+            /* usage(stdout); */
+            break;
+        case 'v':
+            printf("%s %s\n", program_invocation_short_name, "devel");
+            exit(EXIT_SUCCESS);
+        case 'p':
+            from_pkg = true;
+            break;
+        case 'd':
+            from_pkg = false;
+            break;
+        default:
+            break;
+        }
+    }
 
     if (argc < 2)
         errx(1, "not enough arguments");
 
     for (i = 1; i < argc; ++i) {
-        alpm_dump_elf(argv[i]);
+        const alpm_list_t *it;
+
+        if (from_pkg) {
+            pkg_dump_elf(argv[i]);
+        } else {
+            dir_dump_elf(argv[i]);
+        }
+
+        for (it = need; it; it = it->next) {
+            const char *name = it->data;
+            if (alpm_list_find_str(provide, name) == NULL)
+                printf(" REQUIRE %s\n", name);
+            else
+                printf(" REQUIRE %s [self provided]\n", name);
+        }
+
+        for (it = provide; it; it = it->next) {
+            const char *name = it->data;
+            printf(" PROVIDES %s\n", name);
+        }
+
+        alpm_list_free(need);
+        alpm_list_free(provide);
+        need = NULL;
+        provide = NULL;
     }
 }
