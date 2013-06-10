@@ -222,8 +222,6 @@ static int pkg_dump_elf(const char *filename)
     archive_read_support_filter_all(archive);
     archive_read_support_format_all(archive);
 
-    printf(":: %s\n", filename);
-
     int r = archive_read_open_memory(archive, memblock, st.st_size);
     if (r != ARCHIVE_OK) {
         warnx("%s is not an archive", filename);
