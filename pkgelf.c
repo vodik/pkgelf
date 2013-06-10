@@ -186,10 +186,11 @@ static int dir_dump(const char *filename, const struct stat *st, int type)
         goto cleanup;
     }
 
-    memblock = mmap(NULL, st->st_size, PROT_READ, MAP_SHARED | MAP_POPULATE, fd, 0);
+    memblock = mmap(NULL, st->st_size, PROT_READ, MAP_SHARED, fd, 0);
     if (memblock == MAP_FAILED)
         err(EXIT_FAILURE, "failed to mmap package %s", filename);
 
+    madvise(memblock, st->st_size, MADV_WILLNEED | MADV_SEQUENTIAL);
     dump_elf(memblock);
 
 cleanup:
