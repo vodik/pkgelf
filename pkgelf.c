@@ -44,8 +44,20 @@ static int strcmp_v(const void *p1, const void *p2)
 
 static void list_add(alpm_list_t **list, const char *data)
 {
-    if (alpm_list_find_str(*list, data) == NULL)
-        *list = alpm_list_add_sorted(*list, strdup(data), strcmp_v);
+    char *ext = strrchr(data, '.');
+    if (!ext || strcmp(ext, ".so") == 0)
+        return;
+
+    *ext = '\0';
+
+    int ver = atoi(ext + 1);
+    char *name = NULL;
+    asprintf(&name, "%s=%d-%d", data, ver, 64);
+
+    if (name && alpm_list_find_str(*list, name) == NULL)
+        *list = alpm_list_add_sorted(*list, name, strcmp_v);
+    else
+        free(name);
 }
 
 static void dump_elf(const char *memblock, alpm_list_t **need, alpm_list_t **provide)
@@ -81,12 +93,11 @@ static void dump_elf(const char *memblock, alpm_list_t **need, alpm_list_t **pro
                     switch (j->d_tag) {
                     case DT_NEEDED:
                         name = strtable + j->d_un.d_val;
-                        list_add(need, (void *)name);
+                        list_add(need, name);
                         break;
                     case DT_SONAME:
                         name = strtable + j->d_un.d_val;
-                        if (strcmp(strrchr(name, '.'), ".so") != 0)
-                            list_add(provide, (void *)name);
+                        list_add(provide, name);
                         break;
                     }
                 }
@@ -153,7 +164,10 @@ int alpm_dump_elf(const char *filename)
 
     for (it = need; it; it = it->next) {
         const char *name = it->data;
-        printf(" NEEDED %s\n", name);
+        if (alpm_list_find_str(provide, name) == NULL)
+            printf(" REQUIRE %s\n", name);
+        else
+            printf(" REQUIRE %s [self provided]\n", name);
     }
 
     for (it = provide; it; it = it->next) {
