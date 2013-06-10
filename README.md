@@ -18,7 +18,7 @@ REQUIRE libpthread.so=0-64
 REQUIRE librt.so=1-64
 REQUIRE libsndfile.so=1-64
 REQUIRE libxcb.so=1-64
-PROVIDES libpulse-mainloop-glib.so=0-64
-PROVIDES libpulse-simple.so=0-64
-PROVIDES libpulse.so=0-64
+PROVIDE libpulse-mainloop-glib.so=0-64
+PROVIDE libpulse-simple.so=0-64
+PROVIDE libpulse.so=0-64
 ```

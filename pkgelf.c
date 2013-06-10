@@ -339,7 +339,7 @@ int main(int argc, char *argv[])
 
         for (it = provide; it; it = it->next) {
             const char *name = it->data;
-            printf("PROVIDES %s\n", name);
+            printf("PROVIDE %s\n", name);
         }
 
         alpm_list_free(need);
