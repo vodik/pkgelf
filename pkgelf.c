@@ -75,7 +75,8 @@ static void dump_elf(const char *memblock, const char *path)
                         break;
                     case DT_SONAME:
                         name = strtable + j->d_un.d_val;
-                        printf(" PROVIDES %s\n", name);
+                        if (strcmp(strrchr(name, '.'), ".so") != 0)
+                            printf(" PROVIDES %s\n", name);
                         break;
                     }
                 }
