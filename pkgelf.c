@@ -33,12 +33,12 @@ static uintptr_t calc_relocbase(const char *memblock, const Elf64_Ehdr *elf)
     return elf->e_phoff - phdr->p_vaddr;
 }
 
-static inline const char *find_strtable(const char *memblock, const Elf64_Ehdr *elf)
-{
-    const Elf64_Off strtbl_off = elf->e_shoff + elf->e_shstrndx * elf->e_shentsize;
-    const Elf64_Shdr* strtbl = (Elf64_Shdr*)&memblock[strtbl_off];
-    return &memblock[strtbl->sh_offset];
-}
+/* static inline const char *find_strtable(const char *memblock, const Elf64_Ehdr *elf) */
+/* { */
+/*     const Elf64_Off strtbl_off = elf->e_shoff + elf->e_shstrndx * elf->e_shentsize; */
+/*     const Elf64_Shdr* strtbl = (Elf64_Shdr*)&memblock[strtbl_off]; */
+/*     return &memblock[strtbl->sh_offset]; */
+/* } */
 
 static const char *find_dyn_strtable(const char *memblock, uintptr_t relocbase, const Elf64_Dyn *dyn)
 {
@@ -98,6 +98,41 @@ static char *hex_representation(unsigned char *bytes, size_t size)
     return str;
 }
 
+static void read_dynamic(const char *memblock, uintptr_t relocbase, const Elf64_Shdr *shdr)
+{
+    const Elf64_Dyn *j, *dyn = (Elf64_Dyn *)&memblock[shdr->sh_offset];
+    const char *strtable = find_dyn_strtable(memblock, relocbase, dyn);
+
+    for (j = dyn; j->d_tag != DT_NULL; ++j) {
+        const char *name;
+        switch (j->d_tag) {
+            case DT_NEEDED:
+                name = strtable + j->d_un.d_val;
+                list_add(&need, name);
+                break;
+            case DT_SONAME:
+                name = strtable + j->d_un.d_val;
+                list_add(&provide, name);
+                break;
+        }
+    }
+}
+
+static void read_build_id(const char *memblock, const Elf64_Shdr *shdr)
+{
+    const Elf64_Nhdr *nhdr = (Elf64_Nhdr *)&memblock[shdr->sh_offset];
+    const char *temp = &memblock[shdr->sh_offset + sizeof *nhdr];
+    if (strncmp(temp, "GNU", nhdr->n_namesz) == 0 && nhdr->n_type == NT_GNU_BUILD_ID) {
+        char *desc = malloc(nhdr->n_descsz);
+
+        temp += nhdr->n_namesz;
+        memcpy(desc, temp, nhdr->n_descsz);
+        build_id = alpm_list_add(build_id, hex_representation((unsigned char *)desc, nhdr->n_descsz));
+
+        free(desc);
+    }
+}
+
 static void dump_elf(const char *memblock)
 {
     static const char magic[] = { ELFMAG0, ELFMAG1, ELFMAG2, ELFMAG3 };
@@ -119,42 +154,15 @@ static void dump_elf(const char *memblock)
 
     if (elf->e_shoff) {
         const Elf64_Shdr *shdr = (Elf64_Shdr *)&memblock[elf->e_shoff];
-        /* const char *strtable = find_strtable(memblock, elf); */
         int i;
 
         for (i = 0; i < elf->e_shnum; ++i) {
-            /* const char *name = strtable + shdr[i].sh_name; */
-            /* if (strcmp(".dynamic", name) == 0) { */
             switch (shdr[i].sh_type) {
             case SHT_DYNAMIC: {
-                const Elf64_Dyn *j, *dyn = (Elf64_Dyn *)&memblock[shdr[i].sh_offset];
-                const char *strtable = find_dyn_strtable(memblock, relocbase, dyn);
-
-                for (j = dyn; j->d_tag != DT_NULL; ++j) {
-                    const char *name;
-                    switch (j->d_tag) {
-                    case DT_NEEDED:
-                        name = strtable + j->d_un.d_val;
-                        list_add(&need, name);
-                        break;
-                    case DT_SONAME:
-                        name = strtable + j->d_un.d_val;
-                        list_add(&provide, name);
-                        break;
-                    }
-                }
+                read_dynamic(memblock, relocbase, &shdr[i]);
                 break;
             } case SHT_NOTE: {
-            /* } else if (strcmp(".note.gnu.build-id", name) == 0) { */
-                const Elf64_Nhdr *nhdr = (Elf64_Nhdr *)&memblock[shdr[i].sh_offset];
-                const char *temp = &memblock[shdr[i].sh_offset + sizeof *nhdr];
-                if (strncmp(temp, "GNU", nhdr->n_namesz) == 0 && nhdr->n_type == NT_GNU_BUILD_ID) {
-                    char *desc = malloc(nhdr->n_descsz);
-
-                    temp += nhdr->n_namesz;
-                    memcpy(desc, temp, nhdr->n_descsz);
-                    build_id = alpm_list_add(build_id, hex_representation((unsigned char *)desc, nhdr->n_descsz));
-                }
+                read_build_id(memblock, &shdr[i]);
                 break;
             } default:
                 break;
