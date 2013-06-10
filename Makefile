@@ -5,7 +5,7 @@ CFLAGS := -std=c99 \
 	-D_GNU_SOURCE \
 	${CFLAGS}
 
-LDLIBS = -larchive
+LDLIBS = -larchive -lalpm
 
 all: pkgelf
 pkgelf: pkgelf.o

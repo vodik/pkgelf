@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
+#include <alpm.h>
 #include <archive.h>
 #include <archive_entry.h>
 
@@ -36,7 +37,18 @@ static const char *find_strtable(const char *memblock, uintptr_t relocbase, cons
     errx(1, "failed to find string table");
 }
 
-static void dump_elf(const char *memblock)
+static int strcmp_v(const void *p1, const void *p2)
+{
+    return strcmp(p1, p2);
+}
+
+static void list_add(alpm_list_t **list, const char *data)
+{
+    if (alpm_list_find_str(*list, data) == NULL)
+        *list = alpm_list_add_sorted(*list, strdup(data), strcmp_v);
+}
+
+static void dump_elf(const char *memblock, alpm_list_t **need, alpm_list_t **provide)
 {
     static const char magic[] = { ELFMAG0, ELFMAG1, ELFMAG2, ELFMAG3 };
 
@@ -69,19 +81,18 @@ static void dump_elf(const char *memblock)
                     switch (j->d_tag) {
                     case DT_NEEDED:
                         name = strtable + j->d_un.d_val;
-                        printf(" NEEDED %s\n", name);
+                        list_add(need, (void *)name);
                         break;
                     case DT_SONAME:
                         name = strtable + j->d_un.d_val;
                         if (strcmp(strrchr(name, '.'), ".so") != 0)
-                            printf(" PROVIDES %s\n", name);
+                            list_add(provide, (void *)name);
                         break;
                     }
                 }
             }
         }
     }
-
 }
 
 int alpm_dump_elf(const char *filename)
@@ -90,6 +101,7 @@ int alpm_dump_elf(const char *filename)
     struct stat st;
     char *memblock = MAP_FAILED;
     int fd = 0, rc = 0;
+    alpm_list_t *need = NULL, *provide = NULL, *it;
 
     fd = open(filename, O_RDONLY);
     if (fd < 0) {
@@ -135,9 +147,22 @@ int alpm_dump_elf(const char *filename)
         if (bytes_r < block_size)
             err(1, "didn't read enough bytes");
 
-        dump_elf(block);
+        dump_elf(block, &need, &provide);
         free(block);
     }
+
+    for (it = need; it; it = it->next) {
+        const char *name = it->data;
+        printf(" NEEDED %s\n", name);
+    }
+
+    for (it = provide; it; it = it->next) {
+        const char *name = it->data;
+        printf(" PROVIDES %s\n", name);
+    }
+
+    alpm_list_free(need);
+    alpm_list_free(provide);
 
 cleanup:
     if (fd)
