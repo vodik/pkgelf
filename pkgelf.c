@@ -233,7 +233,7 @@ int main(int argc, char *argv[])
     };
 
     int i;
-    bool from_pkg = true;
+    int (*dumper)(const char *name) = pkg_dump_elf;
 
     while (true) {
         int opt = getopt_long(argc, argv, "hvpd", opts, NULL);
@@ -248,10 +248,10 @@ int main(int argc, char *argv[])
             printf("%s %s\n", program_invocation_short_name, "devel");
             exit(EXIT_SUCCESS);
         case 'p':
-            from_pkg = true;
+            dumper = pkg_dump_elf;
             break;
         case 'd':
-            from_pkg = false;
+            dumper = dir_dump_elf;
             break;
         default:
             break;
@@ -264,11 +264,7 @@ int main(int argc, char *argv[])
     for (i = 1; i < argc; ++i) {
         const alpm_list_t *it;
 
-        if (from_pkg) {
-            pkg_dump_elf(argv[i]);
-        } else {
-            dir_dump_elf(argv[i]);
-        }
+        dumper(argv[i]);
 
         for (it = need; it; it = it->next) {
             const char *name = it->data;
