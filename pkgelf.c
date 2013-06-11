@@ -40,7 +40,6 @@ typedef union {
 
 typedef struct elf {
     const char *memblock;
-    uintptr_t relocbase;
     enum elfsize size;
 
     off_t phoff;
@@ -52,6 +51,31 @@ typedef struct elf {
 static alpm_list_t *need = NULL;
 static alpm_list_t *provide = NULL;
 static alpm_list_t *build_id = NULL;
+
+uintptr_t vaddr_2_foffset(const elf_t *elf, const Elf64_Phdr *pr, uintptr_t vma)
+{
+    if (elf->size == ELF32) {
+        Elf32_Phdr *pr32 = (Elf32_Phdr *)pr;
+
+        for (size_t p = 0; p < elf->phnum; p++) {
+            if (pr32[p].p_type == PT_LOAD) {
+                if ((vma >= pr32[p].p_vaddr)) {
+                    return vma - pr32[p].p_vaddr + pr32[p].p_offset;
+                }
+            }
+        }
+    } else {
+        for (size_t p = 0; p < elf->phnum; p++) {
+            if (pr[p].p_type == PT_LOAD) {
+                if ((vma >= pr[p].p_vaddr)) {
+                    return vma - pr[p].p_vaddr + pr[p].p_offset;
+                }
+            }
+        }
+    }
+
+    return vma;
+}
 
 static char *hex_representation(unsigned char *bytes, size_t size)
 {
@@ -102,7 +126,6 @@ static void list_add(alpm_list_t **list, const char *_data, int size)
 static elf_t *load_elf(const char *memblock)
 {
     elf_t *elf = NULL;
-    const Elf_Phdr *phdr;
     const Elf_Ehdr *hdr = (Elf_Ehdr *)memblock;
 
     /* check the magic */
@@ -134,37 +157,37 @@ static elf_t *load_elf(const char *memblock)
         return NULL;
     }
 
-    phdr = (Elf_Phdr *)&memblock[elf->phoff];
-    /* p_type is the first field and always the same size */
-    if (phdr->e64.p_type == PT_PHDR) {
-        if (elf->size == ELF64)
-            elf->relocbase = hdr->e64.e_phoff - phdr->e64.p_vaddr;
-        else
-            elf->relocbase = hdr->e32.e_phoff - phdr->e32.p_vaddr;
-    }
-
     return elf;
 }
 
 static const char *find_strtable(const elf_t *elf, const Elf64_Dyn *dyn)
 {
+    uintptr_t strtab = 0;
+
     if (elf->size == ELF64) {
         const Elf64_Dyn *i;
 
         for (i = dyn; i->d_tag != DT_NULL; ++i) {
-            if (i->d_tag == DT_STRTAB)
-                return &elf->memblock[i->d_un.d_ptr + elf->relocbase];
+            if (i->d_tag == DT_STRTAB) {
+                strtab = i->d_un.d_ptr;
+                break;
+            }
         }
     } else {
         const Elf32_Dyn *i;
 
         for (i = (Elf32_Dyn *)dyn; i->d_tag != DT_NULL; ++i) {
-            if (i->d_tag == DT_STRTAB)
-                return &elf->memblock[i->d_un.d_ptr + elf->relocbase];
+            if (i->d_tag == DT_STRTAB) {
+                strtab = i->d_un.d_ptr;
+                break;
+            }
         }
     }
 
-    errx(1, "failed to find string table");
+    if (!strtab)
+        errx(1, "failed to find string table");
+
+    return &elf->memblock[vaddr_2_foffset(elf, (void *)&elf->memblock[elf->phoff], strtab)];
 }
 
 static void read_dynamic(const elf_t *elf, const Elf64_Dyn *dyn)
@@ -244,7 +267,6 @@ static void dump_elf(const char *memblock)
         shdr = (Elf_Shdr *)&memblock[elf->shoff + i * jump];
         uintptr_t offset;
 
-        /* printf("%d\n", shdr[i].e64.sh_type); */
         switch (shdr->e64.sh_type) {
         case SHT_DYNAMIC:
             offset = get_offset(elf, shdr);
