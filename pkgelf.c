@@ -172,22 +172,18 @@ static const char *find_strtable(const elf_t *elf, uintptr_t dyn_ptr)
 {
     uintptr_t strtab = 0;
 
-    if (elf->class == ELF64) {
-        const Elf64_Dyn *dyn = (Elf64_Dyn *)(elf->memblock + dyn_ptr);
-        for (; dyn->d_tag != DT_NULL; ++dyn) {
-            if (dyn->d_tag == DT_STRTAB) {
-                strtab = dyn->d_un.d_ptr;
-                break;
-            }
+    for (;;) {
+        const Elf_Dyn *dyn = (Elf_Dyn *)(elf->memblock + dyn_ptr);
+        uint32_t tag = FIELD(elf, dyn, d_tag);
+
+        if (tag == DT_NULL) {
+            break;
+        } else if (tag == DT_STRTAB) {
+            strtab = FIELD(elf, dyn, d_un.d_val);
+            break;
         }
-    } else {
-        const Elf32_Dyn *dyn = (Elf32_Dyn *)(elf->memblock + dyn_ptr);
-        for (; dyn->d_tag != DT_NULL; ++dyn) {
-            if (dyn->d_tag == DT_STRTAB) {
-                strtab = dyn->d_un.d_ptr;
-                break;
-            }
-        }
+
+        dyn_ptr += elf->dynsize;
     }
 
     if (!strtab)
