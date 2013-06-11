@@ -153,24 +153,23 @@ static void read_build_id(const elf_t *elf, const Elf64_Shdr *shdr)
 static void dump_elf(const char *memblock)
 {
     const elf_t *elf = load_elf(memblock);
+    const Elf64_Shdr *shdr;
+    size_t i;
+
     if (!elf)
         return;
 
-    if (elf->shoff) {
-        const Elf64_Shdr *shdr = (Elf64_Shdr *)&memblock[elf->shoff];
-        size_t i;
-
-        for (i = 0; i < elf->shnum; ++i) {
-            switch (shdr[i].sh_type) {
-            case SHT_DYNAMIC:
-                read_dynamic(elf, &shdr[i]);
-                break;
-            case SHT_NOTE:
-                read_build_id(elf, &shdr[i]);
-                break;
-            default:
-                break;
-            }
+    shdr = (Elf64_Shdr *)&memblock[elf->shoff];
+    for (i = 0; i < elf->shnum; ++i) {
+        switch (shdr[i].sh_type) {
+        case SHT_DYNAMIC:
+            read_dynamic(elf, &shdr[i]);
+            break;
+        case SHT_NOTE:
+            read_build_id(elf, &shdr[i]);
+            break;
+        default:
+            break;
         }
     }
 }
