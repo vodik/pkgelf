@@ -1,5 +1,5 @@
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <stdbool.h>
 #include <memory.h>
 #include <errno.h>
@@ -20,6 +20,14 @@
 static alpm_list_t *need = NULL;
 static alpm_list_t *provide = NULL;
 static alpm_list_t *build_id = NULL;
+
+typedef struct elf {
+    const char *memblock;
+    uintptr_t relocbase;
+
+    off_t shoff;
+    size_t shnum;
+} elf_t;
 
 static char *hex_representation(unsigned char *bytes, size_t size)
 {
@@ -67,34 +75,52 @@ static void list_add(alpm_list_t **list, const char *_data)
     free(data);
 }
 
-static uintptr_t calc_relocbase(const char *memblock, const Elf64_Ehdr *elf)
+static elf_t *load_elf(const char *memblock)
 {
-    if (elf->e_type == ET_DYN || elf->e_type == ET_REL)
-        return 0;
+    elf_t *elf = NULL;
+    const Elf64_Ehdr *hdr = (Elf64_Ehdr *)memblock;
+    const Elf64_Phdr *phdr ;
 
-    const Elf64_Phdr *phdr = (Elf64_Phdr *)&memblock[elf->e_phoff];
+    /* check the magic */
+    if (memcmp(hdr->e_ident, ELFMAG, SELFMAG) != 0) {
+        return NULL;
+    }
+
+    /* FIXME: we only support x86 atm */
+    if (hdr->e_machine != EM_X86_64) {
+        return NULL;
+    }
+
+    elf = calloc(1, sizeof(elf_t));
+    elf->memblock = memblock;
+
+    phdr = (Elf64_Phdr *)&memblock[hdr->e_phoff];
     while (phdr->p_type != PT_PHDR)
         ++phdr;
+    elf->relocbase = hdr->e_phoff - phdr->p_vaddr;
 
-    return elf->e_phoff - phdr->p_vaddr;
+    elf->shoff = hdr->e_shoff;
+    elf->shnum = hdr->e_shnum;
+
+    return elf;
 }
 
-static const char *find_strtable(const char *memblock, uintptr_t relocbase, const Elf64_Dyn *dyn)
+static const char *find_strtable(const elf_t *elf, const Elf64_Dyn *dyn)
 {
     const Elf64_Dyn *i;
 
     for (i = dyn; i->d_tag != DT_NULL; ++i) {
         if (i->d_tag == DT_STRTAB)
-            return &memblock[i->d_un.d_ptr + relocbase];
+            return &elf->memblock[i->d_un.d_ptr + elf->relocbase];
     }
 
     errx(1, "failed to find string table");
 }
 
-static void read_dynamic(const char *memblock, uintptr_t relocbase, const Elf64_Shdr *shdr)
+static void read_dynamic(const elf_t *elf, const Elf64_Shdr *shdr)
 {
-    const Elf64_Dyn *j, *dyn = (Elf64_Dyn *)&memblock[shdr->sh_offset];
-    const char *strtable = find_strtable(memblock, relocbase, dyn);
+    const Elf64_Dyn *j, *dyn = (Elf64_Dyn *)&elf->memblock[shdr->sh_offset];
+    const char *strtable = find_strtable(elf, dyn);
 
     for (j = dyn; j->d_tag != DT_NULL; ++j) {
         const char *name = strtable + j->d_un.d_val;
@@ -109,10 +135,10 @@ static void read_dynamic(const char *memblock, uintptr_t relocbase, const Elf64_
     }
 }
 
-static void read_build_id(const char *memblock, const Elf64_Shdr *shdr)
+static void read_build_id(const elf_t *elf, const Elf64_Shdr *shdr)
 {
-    const Elf64_Nhdr *nhdr = (Elf64_Nhdr *)&memblock[shdr->sh_offset];
-    const char *temp = &memblock[shdr->sh_offset + sizeof *nhdr];
+    const Elf64_Nhdr *nhdr = (Elf64_Nhdr *)&elf->memblock[shdr->sh_offset];
+    const char *temp = &elf->memblock[shdr->sh_offset + sizeof *nhdr];
     if (strncmp(temp, "GNU", nhdr->n_namesz) == 0 && nhdr->n_type == NT_GNU_BUILD_ID) {
         char *desc = malloc(nhdr->n_descsz);
 
@@ -126,32 +152,19 @@ static void read_build_id(const char *memblock, const Elf64_Shdr *shdr)
 
 static void dump_elf(const char *memblock)
 {
-    const Elf64_Ehdr *elf = (Elf64_Ehdr *)memblock;
-    uintptr_t relocbase = 0;
+    const elf_t *elf = load_elf(memblock);
 
-    if (memcmp(elf->e_ident, ELFMAG, SELFMAG) != 0) {
-        return;
-    }
+    if (elf->shoff) {
+        const Elf64_Shdr *shdr = (Elf64_Shdr *)&memblock[elf->shoff];
+        size_t i;
 
-    if (elf->e_machine != EM_X86_64) {
-        return;
-    }
-
-    if (elf->e_phoff) {
-        relocbase = calc_relocbase(memblock, elf);
-    }
-
-    if (elf->e_shoff) {
-        const Elf64_Shdr *shdr = (Elf64_Shdr *)&memblock[elf->e_shoff];
-        int i;
-
-        for (i = 0; i < elf->e_shnum; ++i) {
+        for (i = 0; i < elf->shnum; ++i) {
             switch (shdr[i].sh_type) {
             case SHT_DYNAMIC:
-                read_dynamic(memblock, relocbase, &shdr[i]);
+                read_dynamic(elf, &shdr[i]);
                 break;
             case SHT_NOTE:
-                read_build_id(memblock, &shdr[i]);
+                read_build_id(elf, &shdr[i]);
                 break;
             default:
                 break;
