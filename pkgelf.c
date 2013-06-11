@@ -104,14 +104,12 @@ static void read_dynamic(const char *memblock, uintptr_t relocbase, const Elf64_
     const char *strtable = find_dyn_strtable(memblock, relocbase, dyn);
 
     for (j = dyn; j->d_tag != DT_NULL; ++j) {
-        const char *name;
+        const char *name = strtable + j->d_un.d_val;
         switch (j->d_tag) {
             case DT_NEEDED:
-                name = strtable + j->d_un.d_val;
                 list_add(&need, name);
                 break;
             case DT_SONAME:
-                name = strtable + j->d_un.d_val;
                 list_add(&provide, name);
                 break;
         }
@@ -135,12 +133,10 @@ static void read_build_id(const char *memblock, const Elf64_Shdr *shdr)
 
 static void dump_elf(const char *memblock)
 {
-    static const char magic[] = { ELFMAG0, ELFMAG1, ELFMAG2, ELFMAG3 };
-
     const Elf64_Ehdr *elf = (Elf64_Ehdr *)memblock;
     uintptr_t relocbase = 0;
 
-    if (memcmp(elf->e_ident, magic, sizeof(magic)) != 0) {
+    if (memcmp(elf->e_ident, ELFMAG, SELFMAG) != 0) {
         return;
     }
 
