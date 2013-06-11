@@ -76,7 +76,7 @@ static int strcmp_v(const void *p1, const void *p2)
     return strcmp(p1, p2);
 }
 
-static void list_add(alpm_list_t **list, const char *_data)
+static void list_add(alpm_list_t **list, const char *_data, int size)
 {
     // FIXME: hack around the fact that _data can be read-only memory */
     char *data = strdup(_data);
@@ -89,7 +89,7 @@ static void list_add(alpm_list_t **list, const char *_data)
 
     int ver = atoi(ext + 1);
     char *name = NULL;
-    asprintf(&name, "%s=%d-%d", data, ver, 64);
+    asprintf(&name, "%s=%d-%d", data, ver, size);
 
     if (name && alpm_list_find_str(*list, name) == NULL)
         *list = alpm_list_add_sorted(*list, name, strcmp_v);
@@ -179,10 +179,10 @@ static void read_dynamic(const elf_t *elf, const Elf64_Dyn *dyn)
             const char *name = strtable + j->d_un.d_val;
             switch (j->d_tag) {
             case DT_NEEDED:
-                list_add(&need, name);
+                list_add(&need, name, elf->size == ELF64 ? 64 : 32);
                 break;
             case DT_SONAME:
-                list_add(&provide, name);
+                list_add(&provide, name, elf->size == ELF64 ? 64 : 32);
                 break;
             }
         }
@@ -193,10 +193,10 @@ static void read_dynamic(const elf_t *elf, const Elf64_Dyn *dyn)
             const char *name = strtable + j->d_un.d_val;
             switch (j->d_tag) {
             case DT_NEEDED:
-                list_add(&need, name);
+                list_add(&need, name, elf->size == ELF64 ? 64 : 32);
                 break;
             case DT_SONAME:
-                list_add(&provide, name);
+                list_add(&provide, name, elf->size == ELF64 ? 64 : 32);
                 break;
             }
         }
