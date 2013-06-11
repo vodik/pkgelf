@@ -113,15 +113,17 @@ static elf_t *load_elf(const char *memblock)
     elf = calloc(1, sizeof(elf_t));
     elf->memblock = memblock;
 
-    switch (hdr->e64.e_machine) {
-    case EM_X86_64:
+    switch (hdr->e64.e_ident[EI_CLASS]) {
+    case ELFCLASSNONE:
+        errx(1, "invalid elf class");
+    case ELFCLASS64:
         elf->size = ELF64;
         elf->phoff = hdr->e64.e_phoff;
         elf->phnum = hdr->e64.e_phnum;
         elf->shoff = hdr->e64.e_shoff;
         elf->shnum = hdr->e64.e_shnum;
         break;
-    case EM_386:
+    case ELFCLASS32:
         elf->size = ELF32;
         elf->phoff = hdr->e32.e_phoff;
         elf->phnum = hdr->e32.e_phnum;
@@ -238,7 +240,6 @@ static void dump_elf(const char *memblock)
 
     size_t jump = elf->size == ELF32 ? sizeof(Elf32_Shdr) : sizeof(Elf64_Shdr);
 
-    printf("NUM %ld\n", elf->shnum);
     for (i = 0; i < elf->shnum; ++i) {
         shdr = (Elf_Shdr *)&memblock[elf->shoff + i * jump];
         uintptr_t offset;
