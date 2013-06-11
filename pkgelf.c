@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <memory.h>
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -17,17 +18,40 @@
 #include <archive.h>
 #include <archive_entry.h>
 
-static alpm_list_t *need = NULL;
-static alpm_list_t *provide = NULL;
-static alpm_list_t *build_id = NULL;
+enum elfsize {
+    ELF64,
+    ELF32
+};
+
+typedef union {
+    Elf64_Ehdr e64;
+    Elf32_Ehdr e32;
+} Elf_Ehdr;
+
+typedef union {
+    Elf64_Phdr e64;
+    Elf32_Phdr e32;
+} Elf_Phdr;
+
+typedef union {
+    Elf64_Shdr e64;
+    Elf32_Shdr e32;
+} Elf_Shdr;
 
 typedef struct elf {
     const char *memblock;
     uintptr_t relocbase;
+    enum elfsize size;
 
+    off_t phoff;
+    size_t phnum;
     off_t shoff;
     size_t shnum;
 } elf_t;
+
+static alpm_list_t *need = NULL;
+static alpm_list_t *provide = NULL;
+static alpm_list_t *build_id = NULL;
 
 static char *hex_representation(unsigned char *bytes, size_t size)
 {
@@ -78,67 +102,110 @@ static void list_add(alpm_list_t **list, const char *_data)
 static elf_t *load_elf(const char *memblock)
 {
     elf_t *elf = NULL;
-    const Elf64_Ehdr *hdr = (Elf64_Ehdr *)memblock;
-    const Elf64_Phdr *phdr ;
+    const Elf_Phdr *phdr;
+    const Elf_Ehdr *hdr = (Elf_Ehdr *)memblock;
 
     /* check the magic */
-    if (memcmp(hdr->e_ident, ELFMAG, SELFMAG) != 0) {
-        return NULL;
-    }
-
-    /* FIXME: we only support x86 atm */
-    if (hdr->e_machine != EM_X86_64) {
+    if (memcmp(hdr->e64.e_ident, ELFMAG, SELFMAG) != 0) {
         return NULL;
     }
 
     elf = calloc(1, sizeof(elf_t));
     elf->memblock = memblock;
 
-    phdr = (Elf64_Phdr *)&memblock[hdr->e_phoff];
-    if (phdr->p_type == PT_PHDR) {
-        elf->relocbase = hdr->e_phoff - phdr->p_vaddr;
+    switch (hdr->e64.e_machine) {
+    case EM_X86_64:
+        elf->size = ELF64;
+        elf->phoff = hdr->e64.e_phoff;
+        elf->phnum = hdr->e64.e_phnum;
+        elf->shoff = hdr->e64.e_shoff;
+        elf->shnum = hdr->e64.e_shnum;
+        break;
+    case EM_386:
+        elf->size = ELF32;
+        elf->phoff = hdr->e32.e_phoff;
+        elf->phnum = hdr->e32.e_phnum;
+        elf->shoff = hdr->e32.e_shoff;
+        elf->shnum = hdr->e32.e_shnum;
+        break;
+    default:
+        return NULL;
     }
 
-    elf->shoff = hdr->e_shoff;
-    elf->shnum = hdr->e_shnum;
+    phdr = (Elf_Phdr *)&memblock[elf->phoff];
+    /* p_type is the first field and always the same size */
+    if (phdr->e64.p_type == PT_PHDR) {
+        if (elf->size == ELF64)
+            elf->relocbase = hdr->e64.e_phoff - phdr->e64.p_vaddr;
+        else
+            elf->relocbase = hdr->e32.e_phoff - phdr->e32.p_vaddr;
+    }
 
     return elf;
 }
 
 static const char *find_strtable(const elf_t *elf, const Elf64_Dyn *dyn)
 {
-    const Elf64_Dyn *i;
+    if (elf->size == ELF64) {
+        const Elf64_Dyn *i;
 
-    for (i = dyn; i->d_tag != DT_NULL; ++i) {
-        if (i->d_tag == DT_STRTAB)
-            return &elf->memblock[i->d_un.d_ptr + elf->relocbase];
+        for (i = dyn; i->d_tag != DT_NULL; ++i) {
+            if (i->d_tag == DT_STRTAB)
+                return &elf->memblock[i->d_un.d_ptr + elf->relocbase];
+        }
+    } else {
+        const Elf32_Dyn *i;
+
+        for (i = (Elf32_Dyn *)dyn; i->d_tag != DT_NULL; ++i) {
+            if (i->d_tag == DT_STRTAB)
+                return &elf->memblock[i->d_un.d_ptr + elf->relocbase];
+        }
     }
 
     errx(1, "failed to find string table");
 }
 
-static void read_dynamic(const elf_t *elf, const Elf64_Shdr *shdr)
+static void read_dynamic(const elf_t *elf, const Elf64_Dyn *dyn)
 {
-    const Elf64_Dyn *j, *dyn = (Elf64_Dyn *)&elf->memblock[shdr->sh_offset];
+    /* const Elf64_Dyn *j; */
     const char *strtable = find_strtable(elf, dyn);
 
-    for (j = dyn; j->d_tag != DT_NULL; ++j) {
-        const char *name = strtable + j->d_un.d_val;
-        switch (j->d_tag) {
+    if (elf->size == ELF64) {
+        const Elf64_Dyn *j;
+
+        for (j = dyn; j->d_tag != DT_NULL; ++j) {
+            const char *name = strtable + j->d_un.d_val;
+            switch (j->d_tag) {
             case DT_NEEDED:
                 list_add(&need, name);
                 break;
             case DT_SONAME:
                 list_add(&provide, name);
                 break;
+            }
+        }
+    } else if (elf->size == ELF32) {
+        const Elf32_Dyn *j;
+
+        for (j = (Elf32_Dyn *)dyn; j->d_tag != DT_NULL; ++j) {
+            const char *name = strtable + j->d_un.d_val;
+            switch (j->d_tag) {
+            case DT_NEEDED:
+                list_add(&need, name);
+                break;
+            case DT_SONAME:
+                list_add(&provide, name);
+                break;
+            }
         }
     }
 }
 
-static void read_build_id(const elf_t *elf, const Elf64_Shdr *shdr)
+static void read_build_id(const elf_t *elf, uintptr_t offset, const Elf64_Nhdr *nhdr)
 {
-    const Elf64_Nhdr *nhdr = (Elf64_Nhdr *)&elf->memblock[shdr->sh_offset];
-    const char *temp = &elf->memblock[shdr->sh_offset + sizeof *nhdr];
+    assert(sizeof(Elf64_Nhdr) == sizeof(Elf32_Nhdr));
+
+    const char *temp = &elf->memblock[offset + sizeof *nhdr];
     if (strncmp(temp, "GNU", nhdr->n_namesz) == 0 && nhdr->n_type == NT_GNU_BUILD_ID) {
         char *desc = malloc(nhdr->n_descsz);
 
@@ -150,23 +217,41 @@ static void read_build_id(const elf_t *elf, const Elf64_Shdr *shdr)
     }
 }
 
+static inline uintptr_t get_offset(const elf_t *elf, const Elf_Shdr *shdr)
+{
+    switch (elf->size) {
+    case ELF64:
+        return shdr->e64.sh_offset;
+    case ELF32:
+        return shdr->e32.sh_offset;
+    }
+}
+
 static void dump_elf(const char *memblock)
 {
     const elf_t *elf = load_elf(memblock);
-    const Elf64_Shdr *shdr;
+    const Elf_Shdr *shdr;
     size_t i;
 
     if (!elf)
         return;
 
-    shdr = (Elf64_Shdr *)&memblock[elf->shoff];
+    size_t jump = elf->size == ELF32 ? sizeof(Elf32_Shdr) : sizeof(Elf64_Shdr);
+
+    printf("NUM %ld\n", elf->shnum);
     for (i = 0; i < elf->shnum; ++i) {
-        switch (shdr[i].sh_type) {
+        shdr = (Elf_Shdr *)&memblock[elf->shoff + i * jump];
+        uintptr_t offset;
+
+        /* printf("%d\n", shdr[i].e64.sh_type); */
+        switch (shdr->e64.sh_type) {
         case SHT_DYNAMIC:
-            read_dynamic(elf, &shdr[i]);
+            offset = get_offset(elf, shdr);
+            read_dynamic(elf, (Elf64_Dyn *)&elf->memblock[offset]);
             break;
         case SHT_NOTE:
-            read_build_id(elf, &shdr[i]);
+            offset = get_offset(elf, shdr);
+            read_build_id(elf, offset, (Elf64_Nhdr *)&elf->memblock[offset]);
             break;
         default:
             break;
