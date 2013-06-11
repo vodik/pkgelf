@@ -49,13 +49,13 @@ typedef struct elf {
     enum elfclass class;
     const char *memblock;
 
-    const char *phptr;
-    const char *shptr;
-    size_t shnum;
-    size_t phnum;
-    size_t phsize;
-    size_t shsize;
-    size_t dynsize;
+    const char *ph_ptr;
+    const char *sh_ptr;
+    size_t sh_num;
+    size_t ph_num;
+    size_t ph_size;
+    size_t sh_size;
+    size_t dyn_size;
 } elf_t;
 
 static alpm_list_t *need = NULL;
@@ -66,8 +66,8 @@ uintptr_t vaddr_to_offset(const elf_t *elf, uintptr_t vma)
 {
     size_t i;
 
-    for (i = 0; i < elf->phnum; ++i) {
-        const Elf_Phdr *phdr = (Elf_Phdr *)(elf->phptr + i * elf->phsize);
+    for (i = 0; i < elf->ph_num; ++i) {
+        const Elf_Phdr *phdr = (Elf_Phdr *)(elf->ph_ptr + i * elf->ph_size);
 
         if (phdr->e64.p_type == PT_LOAD) {
             uintptr_t vaddr = FIELD(elf, phdr, p_vaddr);
@@ -143,23 +143,23 @@ static elf_t *load_elf(const char *memblock)
         errx(1, "invalid elf class");
     case ELFCLASS64:
         elf->class = ELF64;
-        elf->phptr = memblock + hdr->e64.e_phoff;
-        elf->shptr = memblock + hdr->e64.e_shoff;
-        elf->phnum = hdr->e64.e_phnum;
-        elf->shnum = hdr->e64.e_shnum;
-        elf->phsize = sizeof(Elf64_Phdr);
-        elf->shsize = sizeof(Elf64_Shdr);
-        elf->dynsize = sizeof(Elf64_Dyn);
+        elf->ph_ptr = memblock + hdr->e64.e_phoff;
+        elf->sh_ptr = memblock + hdr->e64.e_shoff;
+        elf->ph_num = hdr->e64.e_phnum;
+        elf->sh_num = hdr->e64.e_shnum;
+        elf->ph_size = sizeof(Elf64_Phdr);
+        elf->sh_size = sizeof(Elf64_Shdr);
+        elf->dyn_size = sizeof(Elf64_Dyn);
         break;
     case ELFCLASS32:
         elf->class = ELF32;
-        elf->phptr = memblock + hdr->e32.e_phoff;
-        elf->shptr = memblock + hdr->e32.e_shoff;
-        elf->phnum = hdr->e32.e_phnum;
-        elf->shnum = hdr->e32.e_shnum;
-        elf->phsize = sizeof(Elf32_Phdr);
-        elf->shsize = sizeof(Elf32_Shdr);
-        elf->dynsize = sizeof(Elf32_Dyn);
+        elf->ph_ptr = memblock + hdr->e32.e_phoff;
+        elf->sh_ptr = memblock + hdr->e32.e_shoff;
+        elf->ph_num = hdr->e32.e_phnum;
+        elf->sh_num = hdr->e32.e_shnum;
+        elf->ph_size = sizeof(Elf32_Phdr);
+        elf->sh_size = sizeof(Elf32_Shdr);
+        elf->dyn_size = sizeof(Elf32_Dyn);
         break;
     default:
         return NULL;
@@ -183,7 +183,7 @@ static const char *find_strtable(const elf_t *elf, uintptr_t dyn_ptr)
             break;
         }
 
-        dyn_ptr += elf->dynsize;
+        dyn_ptr += elf->dyn_size;
     }
 
     if (!strtab)
@@ -211,7 +211,7 @@ static void read_dynamic(const elf_t *elf, uintptr_t dyn_ptr)
             break;
         }
 
-        dyn_ptr += elf->dynsize;
+        dyn_ptr += elf->dyn_size;
     }
 }
 
@@ -242,8 +242,8 @@ static void dump_elf(const char *memblock)
     if (!elf)
         return;
 
-    for (i = 0; i < elf->shnum; ++i) {
-        shdr = (Elf_Shdr *)(elf->shptr + i * elf->shsize);
+    for (i = 0; i < elf->sh_num; ++i) {
+        shdr = (Elf_Shdr *)(elf->sh_ptr + i * elf->sh_size);
         uintptr_t offset;
 
         switch (shdr->e64.sh_type) {
