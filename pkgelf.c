@@ -128,35 +128,26 @@ static void list_add(alpm_list_t **list, const char *_data, int size)
 static elf_t *load_elf(const char *memblock)
 {
     elf_t *elf = NULL;
-    const Elf_Ehdr *hdr = (Elf_Ehdr *)memblock;
 
     /* check the magic */
-    if (memcmp(hdr->e64.e_ident, ELFMAG, SELFMAG) != 0) {
+    if (memcmp(memblock, ELFMAG, SELFMAG) != 0) {
         return NULL;
     }
 
     elf = calloc(1, sizeof(elf_t));
     elf->memblock = memblock;
 
-    switch (hdr->e64.e_ident[EI_CLASS]) {
+    switch (memblock[EI_CLASS]) {
     case ELFCLASSNONE:
         errx(1, "invalid elf class");
     case ELFCLASS64:
         elf->class = ELF64;
-        elf->ph_ptr = memblock + hdr->e64.e_phoff;
-        elf->sh_ptr = memblock + hdr->e64.e_shoff;
-        elf->ph_num = hdr->e64.e_phnum;
-        elf->sh_num = hdr->e64.e_shnum;
         elf->ph_size = sizeof(Elf64_Phdr);
         elf->sh_size = sizeof(Elf64_Shdr);
         elf->dyn_size = sizeof(Elf64_Dyn);
         break;
     case ELFCLASS32:
         elf->class = ELF32;
-        elf->ph_ptr = memblock + hdr->e32.e_phoff;
-        elf->sh_ptr = memblock + hdr->e32.e_shoff;
-        elf->ph_num = hdr->e32.e_phnum;
-        elf->sh_num = hdr->e32.e_shnum;
         elf->ph_size = sizeof(Elf32_Phdr);
         elf->sh_size = sizeof(Elf32_Shdr);
         elf->dyn_size = sizeof(Elf32_Dyn);
@@ -164,6 +155,12 @@ static elf_t *load_elf(const char *memblock)
     default:
         return NULL;
     }
+
+    const Elf_Ehdr *hdr = (Elf_Ehdr *)memblock;
+    elf->ph_ptr = memblock + FIELD(elf, hdr, e_phoff);
+    elf->sh_ptr = memblock + FIELD(elf, hdr, e_shoff);
+    elf->ph_num = FIELD(elf, hdr, e_phnum);
+    elf->sh_num = FIELD(elf, hdr, e_shnum);
 
     return elf;
 }
