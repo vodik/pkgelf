@@ -142,14 +142,14 @@ static elf_t *load_elf(const char *memblock)
         errx(1, "invalid elf class");
     case ELFCLASS64:
         elf->class = ELF64;
-        elf->ph_size = sizeof(Elf64_Phdr);
-        elf->sh_size = sizeof(Elf64_Shdr);
+        elf->ph_size  = sizeof(Elf64_Phdr);
+        elf->sh_size  = sizeof(Elf64_Shdr);
         elf->dyn_size = sizeof(Elf64_Dyn);
         break;
     case ELFCLASS32:
         elf->class = ELF32;
-        elf->ph_size = sizeof(Elf32_Phdr);
-        elf->sh_size = sizeof(Elf32_Shdr);
+        elf->ph_size  = sizeof(Elf32_Phdr);
+        elf->sh_size  = sizeof(Elf32_Shdr);
         elf->dyn_size = sizeof(Elf32_Dyn);
         break;
     default:
