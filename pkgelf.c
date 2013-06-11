@@ -52,19 +52,21 @@ static alpm_list_t *need = NULL;
 static alpm_list_t *provide = NULL;
 static alpm_list_t *build_id = NULL;
 
-uintptr_t vaddr_2_foffset(const elf_t *elf, const Elf64_Phdr *pr, uintptr_t vma)
+uintptr_t vaddr_2_foffset(const elf_t *elf, uintptr_t vma)
 {
     if (elf->size == ELF32) {
-        Elf32_Phdr *pr32 = (Elf32_Phdr *)pr;
+        Elf32_Phdr *pr = (Elf32_Phdr *)&elf->memblock[elf->phoff];
 
         for (size_t p = 0; p < elf->phnum; p++) {
-            if (pr32[p].p_type == PT_LOAD) {
-                if ((vma >= pr32[p].p_vaddr)) {
-                    return vma - pr32[p].p_vaddr + pr32[p].p_offset;
+            if (pr[p].p_type == PT_LOAD) {
+                if ((vma >= pr[p].p_vaddr)) {
+                    return vma - pr[p].p_vaddr + pr[p].p_offset;
                 }
             }
         }
     } else {
+        Elf64_Phdr *pr = (Elf64_Phdr *)&elf->memblock[elf->phoff];
+
         for (size_t p = 0; p < elf->phnum; p++) {
             if (pr[p].p_type == PT_LOAD) {
                 if ((vma >= pr[p].p_vaddr)) {
@@ -187,7 +189,7 @@ static const char *find_strtable(const elf_t *elf, const Elf64_Dyn *dyn)
     if (!strtab)
         errx(1, "failed to find string table");
 
-    return &elf->memblock[vaddr_2_foffset(elf, (void *)&elf->memblock[elf->phoff], strtab)];
+    return &elf->memblock[vaddr_2_foffset(elf, strtab)];
 }
 
 static void read_dynamic(const elf_t *elf, const Elf64_Dyn *dyn)
