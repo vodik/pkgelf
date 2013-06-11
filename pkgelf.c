@@ -21,28 +21,22 @@ static alpm_list_t *need = NULL;
 static alpm_list_t *provide = NULL;
 static alpm_list_t *build_id = NULL;
 
-static uintptr_t calc_relocbase(const char *memblock, const Elf64_Ehdr *elf)
+static char *hex_representation(unsigned char *bytes, size_t size)
 {
-    if (elf->e_type == ET_DYN || elf->e_type == ET_REL)
-        return 0;
+    static const char *hex_digits = "0123456789abcdef";
+    char *str;
+    size_t i;
 
-    const Elf64_Phdr *phdr = (Elf64_Phdr *)&memblock[elf->e_phoff];
-    while (phdr->p_type != PT_PHDR)
-        ++phdr;
+    str = malloc(2 * size + 1);
 
-    return elf->e_phoff - phdr->p_vaddr;
-}
-
-static const char *find_strtable(const char *memblock, uintptr_t relocbase, const Elf64_Dyn *dyn)
-{
-    const Elf64_Dyn *i;
-
-    for (i = dyn; i->d_tag != DT_NULL; ++i) {
-        if (i->d_tag == DT_STRTAB)
-            return &memblock[i->d_un.d_ptr + relocbase];
+    for (i = 0; i < size; i++) {
+        str[2 * i] = hex_digits[bytes[i] >> 4];
+        str[2 * i + 1] = hex_digits[bytes[i] & 0x0f];
     }
 
-    errx(1, "failed to find string table");
+    str[2 * size] = '\0';
+
+    return str;
 }
 
 static int strcmp_v(const void *p1, const void *p2)
@@ -73,22 +67,28 @@ static void list_add(alpm_list_t **list, const char *_data)
     free(data);
 }
 
-static char *hex_representation(unsigned char *bytes, size_t size)
+static uintptr_t calc_relocbase(const char *memblock, const Elf64_Ehdr *elf)
 {
-    static const char *hex_digits = "0123456789abcdef";
-    char *str;
-    size_t i;
+    if (elf->e_type == ET_DYN || elf->e_type == ET_REL)
+        return 0;
 
-    str = malloc(2 * size + 1);
+    const Elf64_Phdr *phdr = (Elf64_Phdr *)&memblock[elf->e_phoff];
+    while (phdr->p_type != PT_PHDR)
+        ++phdr;
 
-    for (i = 0; i < size; i++) {
-        str[2 * i] = hex_digits[bytes[i] >> 4];
-        str[2 * i + 1] = hex_digits[bytes[i] & 0x0f];
+    return elf->e_phoff - phdr->p_vaddr;
+}
+
+static const char *find_strtable(const char *memblock, uintptr_t relocbase, const Elf64_Dyn *dyn)
+{
+    const Elf64_Dyn *i;
+
+    for (i = dyn; i->d_tag != DT_NULL; ++i) {
+        if (i->d_tag == DT_STRTAB)
+            return &memblock[i->d_un.d_ptr + relocbase];
     }
 
-    str[2 * size] = '\0';
-
-    return str;
+    errx(1, "failed to find string table");
 }
 
 static void read_dynamic(const char *memblock, uintptr_t relocbase, const Elf64_Shdr *shdr)
