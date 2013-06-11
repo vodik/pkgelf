@@ -33,14 +33,7 @@ static uintptr_t calc_relocbase(const char *memblock, const Elf64_Ehdr *elf)
     return elf->e_phoff - phdr->p_vaddr;
 }
 
-/* static inline const char *find_strtable(const char *memblock, const Elf64_Ehdr *elf) */
-/* { */
-/*     const Elf64_Off strtbl_off = elf->e_shoff + elf->e_shstrndx * elf->e_shentsize; */
-/*     const Elf64_Shdr* strtbl = (Elf64_Shdr*)&memblock[strtbl_off]; */
-/*     return &memblock[strtbl->sh_offset]; */
-/* } */
-
-static const char *find_dyn_strtable(const char *memblock, uintptr_t relocbase, const Elf64_Dyn *dyn)
+static const char *find_strtable(const char *memblock, uintptr_t relocbase, const Elf64_Dyn *dyn)
 {
     const Elf64_Dyn *i;
 
@@ -101,7 +94,7 @@ static char *hex_representation(unsigned char *bytes, size_t size)
 static void read_dynamic(const char *memblock, uintptr_t relocbase, const Elf64_Shdr *shdr)
 {
     const Elf64_Dyn *j, *dyn = (Elf64_Dyn *)&memblock[shdr->sh_offset];
-    const char *strtable = find_dyn_strtable(memblock, relocbase, dyn);
+    const char *strtable = find_strtable(memblock, relocbase, dyn);
 
     for (j = dyn; j->d_tag != DT_NULL; ++j) {
         const char *name = strtable + j->d_un.d_val;
