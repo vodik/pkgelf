@@ -52,27 +52,21 @@ static alpm_list_t *need = NULL;
 static alpm_list_t *provide = NULL;
 static alpm_list_t *build_id = NULL;
 
-uintptr_t vaddr_2_foffset(const elf_t *elf, uintptr_t vma)
+uintptr_t vaddr_to_offset(const elf_t *elf, uintptr_t vma)
 {
     if (elf->size == ELF32) {
         Elf32_Phdr *pr = (Elf32_Phdr *)&elf->memblock[elf->phoff];
 
         for (size_t p = 0; p < elf->phnum; p++) {
-            if (pr[p].p_type == PT_LOAD) {
-                if ((vma >= pr[p].p_vaddr)) {
-                    return vma - pr[p].p_vaddr + pr[p].p_offset;
-                }
-            }
+            if (pr[p].p_type == PT_LOAD && vma >= pr[p].p_vaddr)
+                return vma - pr[p].p_vaddr + pr[p].p_offset;
         }
     } else {
         Elf64_Phdr *pr = (Elf64_Phdr *)&elf->memblock[elf->phoff];
 
         for (size_t p = 0; p < elf->phnum; p++) {
-            if (pr[p].p_type == PT_LOAD) {
-                if ((vma >= pr[p].p_vaddr)) {
-                    return vma - pr[p].p_vaddr + pr[p].p_offset;
-                }
-            }
+            if (pr[p].p_type == PT_LOAD && vma >= pr[p].p_vaddr)
+                return vma - pr[p].p_vaddr + pr[p].p_offset;
         }
     }
 
@@ -162,25 +156,23 @@ static elf_t *load_elf(const char *memblock)
     return elf;
 }
 
-static const char *find_strtable(const elf_t *elf, const Elf64_Dyn *dyn)
+static const char *find_strtable(const elf_t *elf, uintptr_t dyn_ptr)
 {
     uintptr_t strtab = 0;
 
     if (elf->size == ELF64) {
-        const Elf64_Dyn *i;
-
-        for (i = dyn; i->d_tag != DT_NULL; ++i) {
-            if (i->d_tag == DT_STRTAB) {
-                strtab = i->d_un.d_ptr;
+        const Elf64_Dyn *dyn = (Elf64_Dyn *)(elf->memblock + dyn_ptr);
+        for (; dyn->d_tag != DT_NULL; ++dyn) {
+            if (dyn->d_tag == DT_STRTAB) {
+                strtab = dyn->d_un.d_ptr;
                 break;
             }
         }
     } else {
-        const Elf32_Dyn *i;
-
-        for (i = (Elf32_Dyn *)dyn; i->d_tag != DT_NULL; ++i) {
-            if (i->d_tag == DT_STRTAB) {
-                strtab = i->d_un.d_ptr;
+        const Elf32_Dyn *dyn = (Elf32_Dyn *)(elf->memblock + dyn_ptr);
+        for (; dyn->d_tag != DT_NULL; ++dyn) {
+            if (dyn->d_tag == DT_STRTAB) {
+                strtab = dyn->d_un.d_ptr;
                 break;
             }
         }
@@ -189,39 +181,38 @@ static const char *find_strtable(const elf_t *elf, const Elf64_Dyn *dyn)
     if (!strtab)
         errx(1, "failed to find string table");
 
-    return &elf->memblock[vaddr_2_foffset(elf, strtab)];
+    return elf->memblock + vaddr_to_offset(elf, strtab);
 }
 
-static void read_dynamic(const elf_t *elf, const Elf64_Dyn *dyn)
+static void read_dynamic(const elf_t *elf, uintptr_t dyn_ptr)
 {
-    /* const Elf64_Dyn *j; */
-    const char *strtable = find_strtable(elf, dyn);
+    const char *strtable = find_strtable(elf, dyn_ptr);
 
     if (elf->size == ELF64) {
-        const Elf64_Dyn *j;
+        const Elf64_Dyn *dyn = (Elf64_Dyn *)(elf->memblock + dyn_ptr);
 
-        for (j = dyn; j->d_tag != DT_NULL; ++j) {
-            const char *name = strtable + j->d_un.d_val;
-            switch (j->d_tag) {
+        for (; dyn->d_tag != DT_NULL; ++dyn) {
+            const char *name = strtable + dyn->d_un.d_val;
+            switch (dyn->d_tag) {
             case DT_NEEDED:
-                list_add(&need, name, elf->size == ELF64 ? 64 : 32);
+                list_add(&need, name, 64);
                 break;
             case DT_SONAME:
-                list_add(&provide, name, elf->size == ELF64 ? 64 : 32);
+                list_add(&provide, name, 64);
                 break;
             }
         }
     } else if (elf->size == ELF32) {
-        const Elf32_Dyn *j;
+        const Elf32_Dyn *dyn = (Elf32_Dyn *)(elf->memblock + dyn_ptr);
 
-        for (j = (Elf32_Dyn *)dyn; j->d_tag != DT_NULL; ++j) {
-            const char *name = strtable + j->d_un.d_val;
-            switch (j->d_tag) {
+        for (; dyn->d_tag != DT_NULL; ++dyn) {
+            const char *name = strtable + dyn->d_un.d_val;
+            switch (dyn->d_tag) {
             case DT_NEEDED:
-                list_add(&need, name, elf->size == ELF64 ? 64 : 32);
+                list_add(&need, name, 32);
                 break;
             case DT_SONAME:
-                list_add(&provide, name, elf->size == ELF64 ? 64 : 32);
+                list_add(&provide, name, 32);
                 break;
             }
         }
@@ -234,11 +225,11 @@ static void read_build_id(const elf_t *elf, uintptr_t offset, const Elf64_Nhdr *
 
     const char *temp = &elf->memblock[offset + sizeof *nhdr];
     if (strncmp(temp, "GNU", nhdr->n_namesz) == 0 && nhdr->n_type == NT_GNU_BUILD_ID) {
-        char *desc = malloc(nhdr->n_descsz);
+        unsigned char *desc = malloc(nhdr->n_descsz);
 
         temp += nhdr->n_namesz;
         memcpy(desc, temp, nhdr->n_descsz);
-        build_id = alpm_list_add(build_id, hex_representation((unsigned char *)desc, nhdr->n_descsz));
+        build_id = alpm_list_add(build_id, hex_representation(desc, nhdr->n_descsz));
 
         free(desc);
     }
@@ -272,7 +263,7 @@ static void dump_elf(const char *memblock)
         switch (shdr->e64.sh_type) {
         case SHT_DYNAMIC:
             offset = get_offset(elf, shdr);
-            read_dynamic(elf, (Elf64_Dyn *)&elf->memblock[offset]);
+            read_dynamic(elf, offset);
             break;
         case SHT_NOTE:
             offset = get_offset(elf, shdr);
