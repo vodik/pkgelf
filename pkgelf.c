@@ -95,9 +95,9 @@ static elf_t *load_elf(const char *memblock)
     elf->memblock = memblock;
 
     phdr = (Elf64_Phdr *)&memblock[hdr->e_phoff];
-    while (phdr->p_type != PT_PHDR)
-        ++phdr;
-    elf->relocbase = hdr->e_phoff - phdr->p_vaddr;
+    if (phdr->p_type == PT_PHDR) {
+        elf->relocbase = hdr->e_phoff - phdr->p_vaddr;
+    }
 
     elf->shoff = hdr->e_shoff;
     elf->shnum = hdr->e_shnum;
@@ -153,6 +153,8 @@ static void read_build_id(const elf_t *elf, const Elf64_Shdr *shdr)
 static void dump_elf(const char *memblock)
 {
     const elf_t *elf = load_elf(memblock);
+    if (!elf)
+        return;
 
     if (elf->shoff) {
         const Elf64_Shdr *shdr = (Elf64_Shdr *)&memblock[elf->shoff];
