@@ -219,16 +219,18 @@ static void read_dynamic(const elf_t *elf, uintptr_t dyn_ptr)
     }
 }
 
-static void read_build_id(const elf_t *elf, uintptr_t offset, const Elf64_Nhdr *nhdr)
+static void read_build_id(const elf_t *elf, uintptr_t offset)
 {
     assert(sizeof(Elf64_Nhdr) == sizeof(Elf32_Nhdr));
 
-    const char *temp = &elf->memblock[offset + sizeof *nhdr];
-    if (strncmp(temp, "GNU", nhdr->n_namesz) == 0 && nhdr->n_type == NT_GNU_BUILD_ID) {
+    const Elf64_Nhdr *nhdr = (Elf64_Nhdr *)(elf->memblock + offset);
+    const char *data = elf->memblock + offset + sizeof *nhdr;
+
+    if (strncmp(data, "GNU", nhdr->n_namesz) == 0 && nhdr->n_type == NT_GNU_BUILD_ID) {
         unsigned char *desc = malloc(nhdr->n_descsz);
 
-        temp += nhdr->n_namesz;
-        memcpy(desc, temp, nhdr->n_descsz);
+        data += nhdr->n_namesz;
+        memcpy(desc, data, nhdr->n_descsz);
         build_id = alpm_list_add(build_id, hex_representation(desc, nhdr->n_descsz));
 
         free(desc);
@@ -267,7 +269,7 @@ static void dump_elf(const char *memblock)
             break;
         case SHT_NOTE:
             offset = get_offset(elf, shdr);
-            read_build_id(elf, offset, (Elf64_Nhdr *)&elf->memblock[offset]);
+            read_build_id(elf, offset);
             break;
         default:
             break;
