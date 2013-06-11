@@ -18,7 +18,7 @@
 #include <archive.h>
 #include <archive_entry.h>
 
-enum elfsize {
+enum elfclass {
     ELF64,
     ELF32
 };
@@ -40,11 +40,11 @@ typedef union {
 
 typedef struct elf {
     const char *memblock;
-    enum elfsize size;
+    enum elfclass class;
 
-    off_t phoff;
+    const char *phptr;
+    const char *shptr;
     size_t phnum;
-    off_t shoff;
     size_t shnum;
 } elf_t;
 
@@ -54,15 +54,15 @@ static alpm_list_t *build_id = NULL;
 
 uintptr_t vaddr_to_offset(const elf_t *elf, uintptr_t vma)
 {
-    if (elf->size == ELF32) {
-        Elf32_Phdr *pr = (Elf32_Phdr *)&elf->memblock[elf->phoff];
+    if (elf->class == ELF32) {
+        Elf32_Phdr *pr = (Elf32_Phdr *)elf->phptr;
 
         for (size_t p = 0; p < elf->phnum; p++) {
             if (pr[p].p_type == PT_LOAD && vma >= pr[p].p_vaddr)
                 return vma - pr[p].p_vaddr + pr[p].p_offset;
         }
     } else {
-        Elf64_Phdr *pr = (Elf64_Phdr *)&elf->memblock[elf->phoff];
+        Elf64_Phdr *pr = (Elf64_Phdr *)elf->phptr;
 
         for (size_t p = 0; p < elf->phnum; p++) {
             if (pr[p].p_type == PT_LOAD && vma >= pr[p].p_vaddr)
@@ -136,17 +136,17 @@ static elf_t *load_elf(const char *memblock)
     case ELFCLASSNONE:
         errx(1, "invalid elf class");
     case ELFCLASS64:
-        elf->size = ELF64;
-        elf->phoff = hdr->e64.e_phoff;
+        elf->class = ELF64;
+        elf->phptr = memblock + hdr->e64.e_phoff;
+        elf->shptr = memblock + hdr->e64.e_shoff;
         elf->phnum = hdr->e64.e_phnum;
-        elf->shoff = hdr->e64.e_shoff;
         elf->shnum = hdr->e64.e_shnum;
         break;
     case ELFCLASS32:
-        elf->size = ELF32;
-        elf->phoff = hdr->e32.e_phoff;
+        elf->class = ELF32;
+        elf->phptr = memblock + hdr->e32.e_phoff;
+        elf->shptr = memblock + hdr->e32.e_shoff;
         elf->phnum = hdr->e32.e_phnum;
-        elf->shoff = hdr->e32.e_shoff;
         elf->shnum = hdr->e32.e_shnum;
         break;
     default:
@@ -160,7 +160,7 @@ static const char *find_strtable(const elf_t *elf, uintptr_t dyn_ptr)
 {
     uintptr_t strtab = 0;
 
-    if (elf->size == ELF64) {
+    if (elf->class == ELF64) {
         const Elf64_Dyn *dyn = (Elf64_Dyn *)(elf->memblock + dyn_ptr);
         for (; dyn->d_tag != DT_NULL; ++dyn) {
             if (dyn->d_tag == DT_STRTAB) {
@@ -188,9 +188,8 @@ static void read_dynamic(const elf_t *elf, uintptr_t dyn_ptr)
 {
     const char *strtable = find_strtable(elf, dyn_ptr);
 
-    if (elf->size == ELF64) {
+    if (elf->class == ELF64) {
         const Elf64_Dyn *dyn = (Elf64_Dyn *)(elf->memblock + dyn_ptr);
-
         for (; dyn->d_tag != DT_NULL; ++dyn) {
             const char *name = strtable + dyn->d_un.d_val;
             switch (dyn->d_tag) {
@@ -202,9 +201,8 @@ static void read_dynamic(const elf_t *elf, uintptr_t dyn_ptr)
                 break;
             }
         }
-    } else if (elf->size == ELF32) {
+    } else if (elf->class == ELF32) {
         const Elf32_Dyn *dyn = (Elf32_Dyn *)(elf->memblock + dyn_ptr);
-
         for (; dyn->d_tag != DT_NULL; ++dyn) {
             const char *name = strtable + dyn->d_un.d_val;
             switch (dyn->d_tag) {
@@ -239,7 +237,7 @@ static void read_build_id(const elf_t *elf, uintptr_t offset)
 
 static inline uintptr_t get_offset(const elf_t *elf, const Elf_Shdr *shdr)
 {
-    switch (elf->size) {
+    switch (elf->class) {
     case ELF64:
         return shdr->e64.sh_offset;
     case ELF32:
@@ -256,10 +254,10 @@ static void dump_elf(const char *memblock)
     if (!elf)
         return;
 
-    size_t jump = elf->size == ELF32 ? sizeof(Elf32_Shdr) : sizeof(Elf64_Shdr);
+    size_t jump = elf->class == ELF32 ? sizeof(Elf32_Shdr) : sizeof(Elf64_Shdr);
 
     for (i = 0; i < elf->shnum; ++i) {
-        shdr = (Elf_Shdr *)&memblock[elf->shoff + i * jump];
+        shdr = (Elf_Shdr *)(elf->shptr + i * jump);
         uintptr_t offset;
 
         switch (shdr->e64.sh_type) {
