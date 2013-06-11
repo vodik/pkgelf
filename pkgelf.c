@@ -220,7 +220,7 @@ static void read_build_id(const elf_t *elf, uintptr_t offset)
     assert(sizeof(Elf64_Nhdr) == sizeof(Elf32_Nhdr));
 
     const Elf64_Nhdr *nhdr = (Elf64_Nhdr *)(elf->memblock + offset);
-    const char *data = elf->memblock + offset + sizeof *nhdr;
+    const char *data = (char *)(nhdr + 1);
 
     if (strncmp(data, "GNU", nhdr->n_namesz) == 0 && nhdr->n_type == NT_GNU_BUILD_ID) {
         unsigned char *desc = malloc(nhdr->n_descsz);
