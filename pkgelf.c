@@ -58,26 +58,10 @@ typedef struct elf {
     size_t dyn_size;
 } elf_t;
 
+static bool ids = false;
 static alpm_list_t *need = NULL;
 static alpm_list_t *provide = NULL;
 static alpm_list_t *build_id = NULL;
-
-uintptr_t vaddr_to_offset(const elf_t *elf, uintptr_t vma)
-{
-    size_t i;
-
-    for (i = 0; i < elf->ph_num; ++i) {
-        const Elf_Phdr *phdr = (Elf_Phdr *)(elf->ph_ptr + i * elf->ph_size);
-
-        if (phdr->e64.p_type == PT_LOAD) {
-            uintptr_t vaddr = FIELD(elf, phdr, p_vaddr);
-            if (vma >= vaddr)
-                return vma - vaddr - FIELD(elf, phdr, p_offset);
-        }
-    }
-
-    return vma;
-}
 
 static char *hex_representation(unsigned char *bytes, size_t size)
 {
@@ -95,6 +79,23 @@ static char *hex_representation(unsigned char *bytes, size_t size)
     str[2 * size] = '\0';
 
     return str;
+}
+
+static uintptr_t vaddr_to_offset(const elf_t *elf, uintptr_t vma)
+{
+    size_t i;
+
+    for (i = 0; i < elf->ph_num; ++i) {
+        const Elf_Phdr *phdr = (Elf_Phdr *)(elf->ph_ptr + i * elf->ph_size);
+
+        if (phdr->e64.p_type == PT_LOAD) {
+            uintptr_t vaddr = FIELD(elf, phdr, p_vaddr);
+            if (vma >= vaddr)
+                return vma - vaddr - FIELD(elf, phdr, p_offset);
+        }
+    }
+
+    return vma;
 }
 
 static int strcmp_v(const void *p1, const void *p2)
@@ -232,30 +233,26 @@ static void read_build_id(const elf_t *elf, uintptr_t offset)
 
 static void dump_elf(const char *memblock)
 {
-    const elf_t *elf = load_elf(memblock);
-    const Elf_Shdr *shdr;
+    elf_t *elf = load_elf(memblock);
     size_t i;
 
     if (!elf)
         return;
 
     for (i = 0; i < elf->sh_num; ++i) {
-        shdr = (Elf_Shdr *)(elf->sh_ptr + i * elf->sh_size);
-        uintptr_t offset;
+        const Elf_Shdr *shdr = (Elf_Shdr *)(elf->sh_ptr + i * elf->sh_size);
 
-        switch (shdr->e64.sh_type) {
-        case SHT_DYNAMIC:
-            offset = FIELD(elf, shdr, sh_offset);
+        if (shdr->e64.sh_type == SHT_DYNAMIC) {
+            uintptr_t offset = FIELD(elf, shdr, sh_offset);
             read_dynamic(elf, offset);
-            break;
-        case SHT_NOTE:
-            offset = FIELD(elf, shdr, sh_offset);
+        } else if (ids && shdr->e64.sh_type == SHT_NOTE) {
+            uintptr_t offset = FIELD(elf, shdr, sh_offset);
             read_build_id(elf, offset);
-            break;
-        default:
-            break;
         }
     }
+
+
+    free(elf);
 }
 
 static int dir_dump(const char *filename, const struct stat *st, int type,
@@ -362,29 +359,42 @@ cleanup:
     return rc;
 }
 
+static void __attribute__((__noreturn__)) usage(FILE *out)
+{
+    fprintf(out, "usage: %s [options] [files...]\n", program_invocation_short_name);
+    fputs("Options:\n"
+        " -h, --help            display this help and exit\n"
+        " -v, --version         display version\n"
+        " -p, --pkg             introspect an archlinux package\n"
+        " -d, --dir             introspect a directory\n"
+        " -i, --build-ids       introspect binary build-ids\n", out);
+
+    exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
+}
+
 int main(int argc, char *argv[])
 {
     static const struct option opts[] = {
-        { "help",     no_argument, 0, 'h' },
-        { "version",  no_argument, 0, 'v' },
-        { "all",      no_argument, 0, 'a' },
-        { "pkg",      no_argument, 0, 'p' },
-        { "dir",      no_argument, 0, 'd' },
+        { "help",      no_argument, 0, 'h' },
+        { "version",   no_argument, 0, 'v' },
+        { "all",       no_argument, 0, 'a' },
+        { "pkg",       no_argument, 0, 'p' },
+        { "dir",       no_argument, 0, 'd' },
+        { "build-ids", no_argument, 0, 'i' },
         { 0, 0, 0, 0 }
     };
 
     int i;
     int (*dumper)(const char *name) = pkg_dump_elf;
-    bool all = false;
 
     while (true) {
-        int opt = getopt_long(argc, argv, "hvapd", opts, NULL);
+        int opt = getopt_long(argc, argv, "hvapdi", opts, NULL);
         if (opt == -1)
             break;
 
         switch (opt) {
         case 'h':
-            /* usage(stdout); */
+            usage(stdout);
             break;
         case 'v':
             printf("%s %s\n", program_invocation_short_name, "devel");
@@ -392,13 +402,14 @@ int main(int argc, char *argv[])
         case 'p':
             dumper = pkg_dump_elf;
             break;
-        case 'a':
-            all = true;
-            break;
         case 'd':
             dumper = dir_dump_elf;
             break;
+        case 'i':
+            ids = true;
+            break;
         default:
+            usage(stderr);
             break;
         }
     }
@@ -420,8 +431,6 @@ int main(int argc, char *argv[])
             const char *name = it->data;
             if (alpm_list_find_str(provide, name) == NULL)
                 printf("REQUIRE %s\n", name);
-            else if (all)
-                printf("REQUIRE %s [self provided]\n", name);
         }
 
         for (it = provide; it; it = it->next) {
@@ -429,8 +438,11 @@ int main(int argc, char *argv[])
             printf("PROVIDE %s\n", name);
         }
 
+        alpm_list_free_inner(need, free);
         alpm_list_free(need);
+        alpm_list_free_inner(provide, free);
         alpm_list_free(provide);
+        alpm_list_free_inner(build_id, free);
         alpm_list_free(build_id);
         need = NULL;
         provide = NULL;
