@@ -251,7 +251,6 @@ static void dump_elf(const char *memblock)
         }
     }
 
-
     free(elf);
 }
 
