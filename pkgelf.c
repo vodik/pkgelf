@@ -387,7 +387,7 @@ int main(int argc, char *argv[])
     int (*dumper)(const char *name) = pkg_dump_elf;
 
     while (true) {
-        int opt = getopt_long(argc, argv, "hvapdi", opts, NULL);
+        int opt = getopt_long(argc, argv, "hvpdi", opts, NULL);
         if (opt == -1)
             break;
 
