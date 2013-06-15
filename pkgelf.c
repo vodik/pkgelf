@@ -109,8 +109,10 @@ static void list_add(alpm_list_t **list, const char *_data, int size)
     char *data = strdup(_data);
 
     char *ext = strrchr(data, '.');
-    if (!ext || strcmp(ext, ".so") == 0)
+    if (!ext || strcmp(ext, ".so") == 0) {
+        free(data);
         return;
+    }
 
     *ext = '\0';
 
