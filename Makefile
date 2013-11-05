@@ -8,7 +8,7 @@ CFLAGS := -std=c99 \
 LDLIBS = -larchive -lalpm
 
 all: pkgelf
-pkgelf: pkgelf.o
+pkgelf: pkgelf.o elf.o
 
 install: pkgelf
 	install -Dm755 pkgelf ${DESTDIR}/usr/bin/pkgelf
