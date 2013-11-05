@@ -142,8 +142,8 @@ static elf_t *load_elf(const char *memblock)
         return NULL;
     }
 
-    elf = calloc(1, sizeof(elf_t));
-    elf->memblock = memblock;
+    elf = malloc(sizeof(elf_t));
+    *elf = (elf_t){ .memblock = memblock };
 
     switch (memblock[EI_CLASS]) {
     case ELFCLASSNONE:
