@@ -17,6 +17,20 @@
 
 #include "elf.h"
 
+static bool ids;
+static alpm_list_t *need;
+static alpm_list_t *provide;
+static alpm_list_t *build_id;
+
+static void dump_elf(const char *memblock)
+{
+    struct elf_t *elf = load_elf(memblock);
+
+    elf_dynamic(elf, &need, &provide);
+    if (ids)
+        elf_build_id(elf, &build_id);
+}
+
 static int dir_dump(const char *filename, const struct stat *st, int type,
                     struct FTW __attribute__((unused)) *ftw)
 {

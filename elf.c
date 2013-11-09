@@ -40,7 +40,7 @@ typedef union {
 
 #define FIELD(elf, hdr, field) ((elf)->class == ELF64 ? (hdr)->e64.field : (hdr)->e32.field)
 
-typedef struct elf {
+typedef struct elf_t {
     enum elfclass class;
     const char *memblock;
 
@@ -122,17 +122,16 @@ static void list_add(alpm_list_t **list, const char *_data, int size)
     free(data);
 }
 
-static elf_t *load_elf(const char *memblock)
+struct elf_t *load_elf(const char *memblock)
 {
-    elf_t *elf = NULL;
+    struct elf_t *elf = NULL;
 
-    /* check the magic */
     if (memcmp(memblock, ELFMAG, SELFMAG) != 0) {
         return NULL;
     }
 
     elf = malloc(sizeof(elf_t));
-    *elf = (elf_t){ .memblock = memblock };
+    *elf = (struct elf_t){ .memblock = memblock };
 
     switch (memblock[EI_CLASS]) {
     case ELFCLASSNONE:
@@ -182,7 +181,8 @@ static const char *find_strtable(const elf_t *elf, uintptr_t dyn_ptr)
     return elf->memblock + vaddr_to_offset(elf, strtab);
 }
 
-static void read_dynamic(const elf_t *elf, uintptr_t dyn_ptr)
+static void read_dynamic(const elf_t *elf, uintptr_t dyn_ptr,
+                         alpm_list_t **need, alpm_list_t **provide)
 {
     const char *strtable = find_strtable(elf, dyn_ptr);
 
@@ -194,10 +194,10 @@ static void read_dynamic(const elf_t *elf, uintptr_t dyn_ptr)
         case DT_NULL:
             return;
         case DT_NEEDED:
-            list_add(&need, name, elf->class);
+            list_add(need, name, elf->class);
             break;
         case DT_SONAME:
-            list_add(&provide, name, elf->class);
+            list_add(provide, name, elf->class);
             break;
         }
 
@@ -205,7 +205,7 @@ static void read_dynamic(const elf_t *elf, uintptr_t dyn_ptr)
     }
 }
 
-static void read_build_id(const elf_t *elf, uintptr_t offset)
+static void read_build_id(const elf_t *elf, uintptr_t offset, alpm_list_t **ids)
 {
     assert(sizeof(Elf64_Nhdr) == sizeof(Elf32_Nhdr));
 
@@ -217,15 +217,14 @@ static void read_build_id(const elf_t *elf, uintptr_t offset)
 
         data += nhdr->n_namesz;
         memcpy(desc, data, nhdr->n_descsz);
-        build_id = alpm_list_add(build_id, hex_representation(desc, nhdr->n_descsz));
+        *ids = alpm_list_add(*ids, hex_representation(desc, nhdr->n_descsz));
 
         free(desc);
     }
 }
 
-void dump_elf(const char *memblock)
+void elf_dynamic(elf_t *elf, alpm_list_t **need, alpm_list_t **provide)
 {
-    elf_t *elf = load_elf(memblock);
     size_t i;
 
     if (!elf)
@@ -236,12 +235,24 @@ void dump_elf(const char *memblock)
 
         if (shdr->e64.sh_type == SHT_DYNAMIC) {
             uintptr_t offset = FIELD(elf, shdr, sh_offset);
-            read_dynamic(elf, offset);
-        } else if (ids && shdr->e64.sh_type == SHT_NOTE) {
-            uintptr_t offset = FIELD(elf, shdr, sh_offset);
-            read_build_id(elf, offset);
+            read_dynamic(elf, offset, need, provide);
         }
     }
+}
 
-    free(elf);
+void elf_build_id(elf_t *elf, alpm_list_t **ids)
+{
+    size_t i;
+
+    if (!elf)
+        return;
+
+    for (i = 0; i < elf->sh_num; ++i) {
+        const Elf_Shdr *shdr = (Elf_Shdr *)(elf->sh_ptr + i * elf->elem_size.sh);
+
+        if (ids && shdr->e64.sh_type == SHT_NOTE) {
+            uintptr_t offset = FIELD(elf, shdr, sh_offset);
+            read_build_id(elf, offset, ids);
+        }
+    }
 }
