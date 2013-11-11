@@ -52,11 +52,6 @@ typedef struct elf_t {
     struct elf_size elem_size;
 } elf_t;
 
-bool ids = false;
-alpm_list_t *need = NULL;
-alpm_list_t *provide = NULL;
-alpm_list_t *build_id = NULL;
-
 static char *hex_representation(unsigned char *bytes, size_t size)
 {
     static const char *hex_digits = "0123456789abcdef";
