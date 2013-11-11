@@ -208,13 +208,8 @@ static void read_build_id(const elf_t *elf, uintptr_t offset, alpm_list_t **ids)
     const char *data = (char *)(nhdr + 1);
 
     if (strncmp(data, "GNU", nhdr->n_namesz) == 0 && nhdr->n_type == NT_GNU_BUILD_ID) {
-        unsigned char *desc = malloc(nhdr->n_descsz);
-
         data += nhdr->n_namesz;
-        memcpy(desc, data, nhdr->n_descsz);
-        *ids = alpm_list_add(*ids, hex_representation(desc, nhdr->n_descsz));
-
-        free(desc);
+        *ids = alpm_list_add(*ids, hex_representation((unsigned char *)data, nhdr->n_descsz));
     }
 }
 
